@@ -87,6 +87,7 @@ An example: dmenu_run -c -bw 2 -l 20 -g 4 -p 'Run: '
 
 This launches dmenu_run with -c (centered), -bw (border width), -l (number of vertical lines) and -g (number of grid columns).
 
+<!---
 * Installing dmenu-distrotube on Arch Linux
 All you need to do is to download the PKGBUILD from this repository.  Then run the following command:
 
@@ -125,3 +126,4 @@ Download the source code from this repository or use a git clone:
 + sudo make clean install && rm config.h
 
 =NOTE:= Installing dmenu-distrotube will overwrite your existing dmenu installation so make a backup of your current config if you need it.
+-->
