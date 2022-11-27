@@ -76,7 +76,7 @@
  * This patch depends on the grid patch.
  * https://tools.suckless.org/dmenu/patches/gridnav/
  */
-#define GRIDNAV_PATCH 0
+#define GRIDNAV_PATCH 1
 
 /* This patch highlights the individual characters of matched text for each dmenu list entry.
  * The fuzzy highlight patch takes precedence over this patch.
@@ -131,7 +131,7 @@
  * treat dmenu more as a "window" rather than as an overlay.
  * https://tools.suckless.org/dmenu/patches/managed/
  */
-#define MANAGED_PATCH 0
+#define MANAGED_PATCH 1
 
 /* This patch adds an additional color scheme for highlighting entries adjacent to the current
  * selection.
@@ -155,7 +155,7 @@
  *
  * https://tools.suckless.org/dmenu/patches/multi-selection/
  */
-#define MULTI_SELECTION_PATCH 0
+#define MULTI_SELECTION_PATCH 1
 
 /* This patch provides dmenu the ability for history navigation similar to that of bash.
  *
@@ -285,7 +285,7 @@
  * it can handle long text.
  * https://tools.suckless.org/dmenu/patches/scroll/
  */
-#define SCROLL_PATCH 0
+#define SCROLL_PATCH 1
 
 /* This patch allows the symbols, which are printed in dmenu to indicate that either the input
  * is too long or there are too many options to be shown in dmenu in one line, to be defined.
@@ -306,7 +306,7 @@
 /* This patch prevents dmenu from indenting items at the same level as the prompt length.
  * https://tools.suckless.org/dmenu/patches/vertfull/
  */
-#define VERTFULL_PATCH 0
+#define VERTFULL_PATCH 1
 
 /* Adds extended window manager hints such as _NET_WM_WINDOW_TYPE and _NET_WM_WINDOW_TYPE_DOCK.
  * https://github.com/Baitinq/dmenu/blob/master/patches/dmenu-wm_type.diff
@@ -325,7 +325,7 @@
  *
  * https://tools.suckless.org/dmenu/patches/xresources/
  */
-#define XRESOURCES_PATCH 0
+#define XRESOURCES_PATCH 1
 
 /* This patch adds options for specifying dmenu window position and width.
  * The center patch takes precedence over the XYW patch if enabled.

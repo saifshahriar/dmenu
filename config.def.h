@@ -36,7 +36,7 @@ static int instant = 0;           /* -n  option; if 1, selects matching item wit
 
 #if CENTER_PATCH
 static int center = 0;            /* -c  option; if 0, dmenu won't be centered on the screen */
-static int min_width = 680;       /* minimum width when centered */
+static int min_width = 200;       /* minimum width when centered */
 #endif // CENTER_PATCH
 
 #if RESTRICT_RETURN_PATCH
