@@ -40,7 +40,7 @@ readxresources(void)
 			colors[SchemeMid][ColFg] = strdup(xval.addr);
 		#endif // MORECOLOR_PATCH
 		#if BORDER_PATCH
-		if (XrmGetResource(xdb, "dmenu.bordercolor", "*", &type, &xval))
+		if (XrmGetResource(xdb, "dmenu.border", "*", &type, &xval))
 			colors[SchemeBorder][ColBg] = strdup(xval.addr);
 		#endif // BORDER_PATCH
 		#if HIGHLIGHT_PATCH
