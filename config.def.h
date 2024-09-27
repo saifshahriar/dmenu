@@ -1,5 +1,24 @@
 /* See LICENSE file for copyright and license details. */
 /* Default settings; can be overriden by command line. */
+/* Patches Added:
+ *     - alpha
+ *     - border
+ *     - center
+ *     - fuzzymatch
+ *     - grid
+ *     - gridnav
+ *     - line_height
+ *     - managed
+ *     - morecolor
+ *     - mouse_support
+ *     - motion_support
+ *     - multi_selection
+ *     - numbers
+ *     - symbols
+ *     - vertfull
+ *     - xresources
+ *     - xyw
+ */
 
 static int topbar = 1;                      /* -b  option; if 0, dmenu appears at bottom */
 #if ALPHA_PATCH
@@ -50,8 +69,8 @@ static const char *prompt      = NULL;      /* -p  option; prompt to the left of
 static const char *dynamic     = NULL;      /* -dy option; dynamic command to run on input change */
 #endif // DYNAMIC_OPTIONS_PATCH
 #if SYMBOLS_PATCH
-static const char *symbol_1 = "<";
-static const char *symbol_2 = ">";
+static const char *symbol_1 = "";
+static const char *symbol_2 = "";
 #endif // SYMBOLS_PATCH
 
 #if ALPHA_PATCH
@@ -124,7 +143,7 @@ static unsigned int columns    = 0;
 #endif // GRID_PATCH
 #if LINE_HEIGHT_PATCH
 static unsigned int lineheight = 0;         /* -h option; minimum height of a menu line     */
-static unsigned int min_lineheight = 8;
+static unsigned int min_lineheight = 0;
 #endif // LINE_HEIGHT_PATCH
 #if NAVHISTORY_PATCH
 static unsigned int maxhist    = 15;
