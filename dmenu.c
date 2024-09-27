@@ -21,18 +21,28 @@
 #if MULTI_SELECTION_PATCH
 #undef NON_BLOCKING_STDIN_PATCH
 #undef PIPEOUT_PATCH
+#undef JSON_PATCH
 #undef PRINTINPUTTEXT_PATCH
 #endif // MULTI_SELECTION_PATCH
+#if JSON_PATCH
+#undef NON_BLOCKING_STDIN_PATCH
+#undef PRINTINPUTTEXT_PATCH
+#undef PIPEOUT_PATCH
+#endif // JSON_PATCH
 
 #include "drw.h"
 #include "util.h"
 #if GRIDNAV_PATCH
 #include <stdbool.h>
 #endif // GRIDNAV_PATCH
+#if JSON_PATCH
+#include <jansson.h>
+#endif // JSON_PATCH
 
 /* macros */
 #define INTERSECT(x,y,w,h,r)  (MAX(0, MIN((x)+(w),(r).x_org+(r).width)  - MAX((x),(r).x_org)) \
                              * MAX(0, MIN((y)+(h),(r).y_org+(r).height) - MAX((y),(r).y_org)))
+#define LENGTH(X)             (sizeof X / sizeof X[0])
 #if PANGO_PATCH
 #define TEXTW(X)              (drw_font_getwidth(drw, (X), False) + lrpad)
 #define TEXTWM(X)             (drw_font_getwidth(drw, (X), True) + lrpad)
@@ -49,16 +59,13 @@ enum {
 	SchemeNorm,
 	SchemeSel,
 	SchemeOut,
-	#if BORDER_PATCH
-	SchemeBorder,
-	#endif // BORDER_PATCH
 	#if MORECOLOR_PATCH
 	SchemeMid,
 	#endif // MORECOLOR_PATCH
-	#if HIGHLIGHT_PATCH
+	#if HIGHLIGHT_PATCH || FUZZYHIGHLIGHT_PATCH
 	SchemeNormHighlight,
 	SchemeSelHighlight,
-	#endif // HIGHLIGHT_PATCH
+	#endif // HIGHLIGHT_PATCH || FUZZYHIGHLIGHT_PATCH
 	#if HIGHPRIORITY_PATCH
 	SchemeHp,
 	#endif // HIGHPRIORITY_PATCH
@@ -75,11 +82,9 @@ enum {
 
 struct item {
 	char *text;
-	#if SEPARATOR_PATCH
-	char *text_output;
-	#elif TSV_PATCH
+	#if TSV_PATCH
 	char *stext;
-	#endif // SEPARATOR_PATCH | TSV_PATCH
+	#endif // TSV_PATCH
 	struct item *left, *right;
 	#if NON_BLOCKING_STDIN_PATCH
 	struct item *next;
@@ -92,6 +97,9 @@ struct item {
 	#if HIGHPRIORITY_PATCH
 	int hp;
 	#endif // HIGHPRIORITY_PATCH
+	#if JSON_PATCH
+	json_t *json;
+	#endif // JSON_PATCH
 	#if FUZZYMATCH_PATCH
 	double distance;
 	#endif // FUZZYMATCH_PATCH
@@ -105,11 +113,6 @@ static char text[BUFSIZ] = "";
 static char pipeout[8] = " | dmenu";
 #endif // PIPEOUT_PATCH
 static char *embed;
-#if SEPARATOR_PATCH
-static char separator;
-static int separator_greedy;
-static int separator_reverse;
-#endif // SEPARATOR_PATCH
 static int bh, mw, mh;
 #if XYW_PATCH
 static int dmx = 0, dmy = 0; /* put dmenu at these x and y offsets */
@@ -120,10 +123,6 @@ static int inputw = 0, promptw;
 static int passwd = 0;
 #endif // PASSWORD_PATCH
 static int lrpad; /* sum of left and right padding */
-#if BARPADDING_PATCH
-static int vp; /* vertical padding for bar */
-static int sp; /* side padding for bar */
-#endif // BARPADDING_PATCH
 #if REJECTNOMATCH_PATCH
 static int reject_no_match = 0;
 #endif // REJECTNOMATCH_PATCH
@@ -178,12 +177,14 @@ static Clr *scheme[SchemeLast];
 
 #include "config.h"
 
-static unsigned int
-textw_clamp(const char *str, unsigned int n)
-{
-	unsigned int w = drw_fontset_getwidth_clamp(drw, str, n) + lrpad;
-	return MIN(w, n);
-}
+#if CASEINSENSITIVE_PATCH
+static char * cistrstr(const char *s, const char *sub);
+static int (*fstrncmp)(const char *, const char *, size_t) = strncasecmp;
+static char *(*fstrstr)(const char *, const char *) = cistrstr;
+#else
+static int (*fstrncmp)(const char *, const char *, size_t) = strncmp;
+static char *(*fstrstr)(const char *, const char *) = strstr;
+#endif // CASEINSENSITIVE_PATCH
 
 static void appenditem(struct item *item, struct item **list, struct item **last);
 static void calcoffsets(void);
@@ -207,14 +208,6 @@ static void run(void);
 static void setup(void);
 static void usage(void);
 
-#if CASEINSENSITIVE_PATCH
-static int (*fstrncmp)(const char *, const char *, size_t) = strncasecmp;
-static char *(*fstrstr)(const char *, const char *) = cistrstr;
-#else
-static int (*fstrncmp)(const char *, const char *, size_t) = strncmp;
-static char *(*fstrstr)(const char *, const char *) = strstr;
-#endif // CASEINSENSITIVE_PATCH
-
 #include "patch/include.c"
 
 static void
@@ -233,9 +226,9 @@ appenditem(struct item *item, struct item **list, struct item **last)
 static void
 calcoffsets(void)
 {
-	int i, n, rpad = 0;
+	int i, n;
 
-	if (lines > 0) {
+	if (lines > 0)
 		#if GRID_PATCH
 		if (columns)
 			n = lines * columns * bh;
@@ -244,22 +237,26 @@ calcoffsets(void)
 		#else
 		n = lines * bh;
 		#endif // GRID_PATCH
-	} else {
-		#if NUMBERS_PATCH
-		rpad = TEXTW(numbers);
-		#endif // NUMBERS_PATCH
+	else
 		#if SYMBOLS_PATCH
-		n = mw - (promptw + inputw + TEXTW(symbol_1) + TEXTW(symbol_2) + rpad);
+		n = mw - (promptw + inputw + TEXTW(symbol_1) + TEXTW(symbol_2));
 		#else
-		n = mw - (promptw + inputw + TEXTW("<") + TEXTW(">") + rpad);
+		n = mw - (promptw + inputw + TEXTW("") + TEXTW(">"));
 		#endif // SYMBOLS_PATCH
-	}
 	/* calculate which items will begin the next page and previous page */
 	for (i = 0, next = curr; next; next = next->right)
-		if ((i += (lines > 0) ? bh : textw_clamp(next->text, n)) > n)
+		#if PANGO_PATCH
+		if ((i += (lines > 0) ? bh : MIN(TEXTWM(next->text), n)) > n)
+		#else
+		if ((i += (lines > 0) ? bh : MIN(TEXTW(next->text), n)) > n)
+		#endif // PANGO_PATCH
 			break;
 	for (i = 0, prev = curr; prev && prev->left; prev = prev->left)
-		if ((i += (lines > 0) ? bh : textw_clamp(prev->left->text, n)) > n)
+		#if PANGO_PATCH
+		if ((i += (lines > 0) ? bh : MIN(TEXTWM(prev->left->text), n)) > n)
+		#else
+		if ((i += (lines > 0) ? bh : MIN(TEXTW(prev->left->text), n)) > n)
+		#endif // PANGO_PATCH
 			break;
 }
 
@@ -269,19 +266,8 @@ cleanup(void)
 	size_t i;
 
 	XUngrabKey(dpy, AnyKey, AnyModifier, root);
-	#if INPUTMETHOD_PATCH
-	XSetInputFocus(dpy, root, RevertToPointerRoot, CurrentTime);
-	#endif // INPUTMETHOD_PATCH
 	for (i = 0; i < SchemeLast; i++)
 		free(scheme[i]);
-	for (i = 0; items && items[i].text; ++i)
-		free(items[i].text);
-	free(items);
-	#if HIGHPRIORITY_PATCH
-	for (i = 0; i < hplength; ++i)
-		free(hpitems[i]);
-	free(hpitems);
-	#endif // HIGHPRIORITY_PATCH
 	drw_free(drw);
 	XSync(dpy, False);
 	XCloseDisplay(dpy);
@@ -305,7 +291,7 @@ static int
 drawitem(struct item *item, int x, int y, int w)
 {
 	int r;
-	#if TSV_PATCH && !SEPARATOR_PATCH
+	#if TSV_PATCH
 	char *text = item->stext;
 	#else
 	char *text = item->text;
@@ -332,11 +318,11 @@ drawitem(struct item *item, int x, int y, int w)
 			case 'p':
 				drw_setscheme(drw, scheme[SchemePurple]);
 				break;
-			#if HIGHLIGHT_PATCH
+			#if HIGHLIGHT_PATCH || FUZZYHIGHLIGHT_PATCH
 			case 'h':
 				drw_setscheme(drw, scheme[SchemeNormHighlight]);
 				break;
-			#endif // HIGHLIGHT_PATCH
+			#endif // HIGHLIGHT_PATCH | FUZZYHIGHLIGHT_PATCH
 			case 's':
 				drw_setscheme(drw, scheme[SchemeSel]);
 				break;
@@ -368,11 +354,11 @@ drawitem(struct item *item, int x, int y, int w)
 			case 'p':
 				drw_setscheme(drw, scheme[SchemePurple]);
 				break;
-			#if HIGHLIGHT_PATCH
+			#if HIGHLIGHT_PATCH || FUZZYHIGHLIGHT_PATCH
 			case 'h':
 				drw_setscheme(drw, scheme[SchemeNormHighlight]);
 				break;
-			#endif // HIGHLIGHT_PATCH
+			#endif // HIGHLIGHT_PATCH | FUZZYHIGHLIGHT_PATCH
 			case 's':
 				drw_setscheme(drw, scheme[SchemeSel]);
 				break;
@@ -473,13 +459,13 @@ drawitem(struct item *item, int x, int y, int w)
 		, True
 		#endif // PANGO_PATCH
 		);
-	#if HIGHLIGHT_PATCH
+	#if HIGHLIGHT_PATCH || FUZZYHIGHLIGHT_PATCH
 	#if EMOJI_HIGHLIGHT_PATCH
 	drawhighlights(item, output + iscomment, x + ((iscomment == 6) ? temppadding : 0), y, w);
 	#else
 	drawhighlights(item, x, y, w);
 	#endif // EMOJI_HIGHLIGHT_PATCH
-	#endif // HIGHLIGHT_PATCH
+	#endif // HIGHLIGHT_PATCH | FUZZYHIGHLIGHT_PATCH
 	return r;
 }
 
@@ -568,13 +554,12 @@ drawmenu(void)
 			#endif // PANGO_PATCH
 		);
 		free(censort);
-	} else {
+	} else
 		drw_text(drw, x, 0, w, bh, lrpad / 2, text, 0
 			#if PANGO_PATCH
 			, False
 			#endif // PANGO_PATCH
 		);
-	}
 	#else
 	drw_text(drw, x, 0, w, bh, lrpad / 2, text, 0
 		#if PANGO_PATCH
@@ -586,11 +571,7 @@ drawmenu(void)
 	curpos = TEXTW(text) - TEXTW(&text[cursor]);
 	if ((curpos += lrpad / 2 - 1) < w) {
 		drw_setscheme(drw, scheme[SchemeNorm]);
-		#if CARET_WIDTH_PATCH && LINE_HEIGHT_PATCH
-		drw_rect(drw, x + curpos, 2 + (bh-fh)/2, caret_width, fh - 4, 1, 0);
-		#elif CARET_WIDTH_PATCH
-		drw_rect(drw, x + curpos, 2, caret_width, bh - 4, 1, 0);
-		#elif LINE_HEIGHT_PATCH
+		#if LINE_HEIGHT_PATCH
 		drw_rect(drw, x + curpos, 2 + (bh-fh)/2, 2, fh - 4, 1, 0);
 		#else
 		drw_rect(drw, x + curpos, 2, 2, bh - 4, 1, 0);
@@ -601,12 +582,6 @@ drawmenu(void)
 	#if NUMBERS_PATCH
 	recalculatenumbers();
 	rpad = TEXTW(numbers);
-	#if BARPADDING_PATCH
-	rpad += 2 * sp;
-	#endif // BARPADDING_PATCH
-	#if BORDER_PATCH
-	rpad += border_width;
-	#endif // BORDER_PATCH
 	#endif // NUMBERS_PATCH
 	if (lines > 0) {
 		#if GRID_PATCH
@@ -647,18 +622,10 @@ drawmenu(void)
 	} else if (matches) {
 		/* draw horizontal list */
 		x += inputw;
-		#if SYMBOLS_PATCH
-		w = TEXTW(symbol_1);
-		#else
-		w = TEXTW("<");
-		#endif // SYMBOLS_PATCH
+		w = TEXTW("");
 		if (curr->left) {
 			drw_setscheme(drw, scheme[SchemeNorm]);
-			#if SYMBOLS_PATCH
-			drw_text(drw, x, 0, w, bh, lrpad / 2, symbol_1, 0
-			#else
 			drw_text(drw, x, 0, w, bh, lrpad / 2, "<", 0
-			#endif // SYMBOLS_PATCH
 				#if PANGO_PATCH
 				, True
 				#endif // PANGO_PATCH
@@ -666,17 +633,21 @@ drawmenu(void)
 		}
 		x += w;
 		for (item = curr; item != next; item = item->right) {
+			#if PANGO_PATCH && TSV_PATCH
+			itw = TEXTWM(item->stext);
+			#elif PANGO_PATCH
+			itw = TEXTWM(item->text);
+			#elif TSV_PATCH
+			itw = TEXTW(item->stext);
+			#else
+			itw = TEXTW(item->text);
+			#endif // PANGO_PATCH | TSV_PATCH
 			#if SYMBOLS_PATCH
 			stw = TEXTW(symbol_2);
 			#else
 			stw = TEXTW(">");
 			#endif // SYMBOLS_PATCH
-			#if TSV_PATCH && !SEPARATOR_PATCH
-			itw = textw_clamp(item->stext, mw - x - stw - rpad);
-			#else
-			itw = textw_clamp(item->text, mw - x - stw - rpad);
-			#endif // TSV_PATCH
-			x = drawitem(item, x, 0, itw);
+			x = drawitem(item, x, 0, MIN(itw, mw - x - stw - rpad));
 		}
 		if (next) {
 			#if SYMBOLS_PATCH
@@ -700,11 +671,8 @@ drawmenu(void)
 	}
 	#if NUMBERS_PATCH
 	drw_setscheme(drw, scheme[SchemeNorm]);
-	#if PANGO_PATCH
-	drw_text(drw, mw - rpad, 0, TEXTW(numbers), bh, lrpad / 2, numbers, 0, False);
+	drw_text(drw, mw - TEXTW(numbers), 0, TEXTW(numbers), bh, lrpad / 2, numbers, 0);
 	#else
-	drw_text(drw, mw - rpad, 0, TEXTW(numbers), bh, lrpad / 2, numbers, 0);
-	#endif // PANGO_PATCH
 	#endif // NUMBERS_PATCH
 	drw_map(drw, win, 0, 0, mw, mh);
 	#if NON_BLOCKING_STDIN_PATCH
@@ -780,12 +748,16 @@ match(void)
 	#if NON_BLOCKING_STDIN_PATCH
 	int preserve = 0;
 	#endif // NON_BLOCKING_STDIN_PATCH
+	#if JSON_PATCH
+	if (json)
+		fstrstr = strcasestr;
+	#endif // JSON_PATCH
 
 	strcpy(buf, text);
 	/* separate input text into tokens to be matched individually */
 	for (s = strtok(buf, " "); s; tokv[tokc - 1] = s, s = strtok(NULL, " "))
 		if (++tokc > tokn && !(tokv = realloc(tokv, ++tokn * sizeof *tokv)))
-			die("cannot realloc %zu bytes:", tokn * sizeof *tokv);
+			die("cannot realloc %u bytes:", tokn * sizeof *tokv);
 	len = tokc ? strlen(tokv[0]) : 0;
 
 	#if PREFIXCOMPLETION_PATCH
@@ -958,12 +930,12 @@ movewordedge(int dir)
 static void
 keypress(XKeyEvent *ev)
 {
-	char buf[64];
+	char buf[32];
 	int len;
 	#if PREFIXCOMPLETION_PATCH
 	struct item * item;
 	#endif // PREFIXCOMPLETION_PATCH
-	KeySym ksym = NoSymbol;
+	KeySym ksym;
 	Status status;
 	#if GRID_PATCH && GRIDNAV_PATCH
 	int i;
@@ -975,39 +947,15 @@ keypress(XKeyEvent *ev)
 	switch (status) {
 	default: /* XLookupNone, XBufferOverflow */
 		return;
-	case XLookupChars: /* composed string from input method */
+	case XLookupChars:
 		goto insert;
 	case XLookupKeySym:
-	case XLookupBoth: /* a KeySym and a string are returned: use keysym */
+	case XLookupBoth:
 		break;
 	}
 
 	if (ev->state & ControlMask) {
 		switch(ksym) {
-		#if FZFEXPECT_PATCH
-		case XK_a: expect("ctrl-a", ev); ksym = XK_Home;      break;
-		case XK_b: expect("ctrl-b", ev); ksym = XK_Left;      break;
-		case XK_c: expect("ctrl-c", ev); ksym = XK_Escape;    break;
-		case XK_d: expect("ctrl-d", ev); ksym = XK_Delete;    break;
-		case XK_e: expect("ctrl-e", ev); ksym = XK_End;       break;
-		case XK_f: expect("ctrl-f", ev); ksym = XK_Right;     break;
-		case XK_g: expect("ctrl-g", ev); ksym = XK_Escape;    break;
-		case XK_h: expect("ctrl-h", ev); ksym = XK_BackSpace; break;
-		case XK_i: expect("ctrl-i", ev); ksym = XK_Tab;       break;
-		case XK_j: expect("ctrl-j", ev); ksym = XK_Down;      break;
-		case XK_J:/* fallthrough */
-		case XK_l: expect("ctrl-l", ev); break;
-		case XK_m: expect("ctrl-m", ev); /* fallthrough */
-		case XK_M: ksym = XK_Return; ev->state &= ~ControlMask; break;
-		case XK_n: expect("ctrl-n", ev); ksym = XK_Down; break;
-		case XK_p: expect("ctrl-p", ev); ksym = XK_Up;   break;
-		case XK_o: expect("ctrl-o", ev); break;
-		case XK_q: expect("ctrl-q", ev); break;
-		case XK_r: expect("ctrl-r", ev); break;
-		case XK_s: expect("ctrl-s", ev); break;
-		case XK_t: expect("ctrl-t", ev); break;
-		case XK_k: expect("ctrl-k", ev); ksym = XK_Up; break;
-		#else
 		case XK_a: ksym = XK_Home;      break;
 		case XK_b: ksym = XK_Left;      break;
 		case XK_c: ksym = XK_Escape;    break;
@@ -1028,47 +976,24 @@ keypress(XKeyEvent *ev)
 			text[cursor] = '\0';
 			match();
 			break;
-		#endif // FZFEXPECT_PATCH
-		#if FZFEXPECT_PATCH
-		case XK_u: expect("ctrl-u", ev); /* delete left */
-		#else
 		case XK_u: /* delete left */
-		#endif // FZFEXPECT_PATCH
 			insert(NULL, 0 - cursor);
 			break;
-		#if FZFEXPECT_PATCH
-		case XK_w: expect("ctrl-w", ev); /* delete word */
-		#else
 		case XK_w: /* delete word */
-		#endif // FZFEXPECT_PATCH
 			while (cursor > 0 && strchr(worddelimiters, text[nextrune(-1)]))
 				insert(NULL, nextrune(-1) - cursor);
 			while (cursor > 0 && !strchr(worddelimiters, text[nextrune(-1)]))
 				insert(NULL, nextrune(-1) - cursor);
 			break;
-		#if FZFEXPECT_PATCH || CTRL_V_TO_PASTE_PATCH
-		case XK_v:
-		#if FZFEXPECT_PATCH
-			expect("ctrl-v", ev);
-		#endif // FZFEXPECT_PATCH
-		case XK_V:
-			XConvertSelection(dpy, (ev->state & ShiftMask) ? clip : XA_PRIMARY,
-			                  utf8, utf8, win, CurrentTime);
-			return;
-		#endif // FZFEXPECT_PATCH | CTRL_V_TO_PASTE_PATCH
-		#if FZFEXPECT_PATCH
-		case XK_y: expect("ctrl-y", ev); /* paste selection */
-		#else
 		case XK_y: /* paste selection */
-		#endif // FZFEXPECT_PATCH
 		case XK_Y:
+		#if CTRL_V_TO_PASTE_PATCH
+		case XK_v:
+		case XK_V:
+		#endif // CTRL_V_TO_PASTE_PATCH
 			XConvertSelection(dpy, (ev->state & ShiftMask) ? clip : XA_PRIMARY,
 			                  utf8, utf8, win, CurrentTime);
 			return;
-		#if FZFEXPECT_PATCH
-		case XK_x: expect("ctrl-x", ev); break;
-		case XK_z: expect("ctrl-z", ev); break;
-		#endif // FZFEXPECT_PATCH
 		case XK_Left:
 		case XK_KP_Left:
 			movewordedge(-1);
@@ -1079,10 +1004,6 @@ keypress(XKeyEvent *ev)
 			goto draw;
 		case XK_Return:
 		case XK_KP_Enter:
-			#if RESTRICT_RETURN_PATCH
-			if (restrict_return)
-				break;
-			#endif // RESTRICT_RETURN_PATCH
 			#if MULTI_SELECTION_PATCH
 			selsel();
 			#endif // MULTI_SELECTION_PATCH
@@ -1125,7 +1046,7 @@ keypress(XKeyEvent *ev)
 	switch(ksym) {
 	default:
 insert:
-		if (!iscntrl((unsigned char)*buf))
+		if (!iscntrl(*buf))
 			insert(buf, len);
 		break;
 	case XK_Delete:
@@ -1225,7 +1146,10 @@ insert:
 			break;
 		#endif // RESTRICT_RETURN_PATCH
 		#if !MULTI_SELECTION_PATCH
-		#if PIPEOUT_PATCH
+		#if JSON_PATCH
+		if (!printjsonssel(ev->state))
+			break;
+		#elif PIPEOUT_PATCH
 		#if PRINTINPUTTEXT_PATCH
 		if (sel && (
 			(use_text_input && (ev->state & ShiftMask)) ||
@@ -1260,22 +1184,12 @@ insert:
 			printf("%d\n", (sel && !(ev->state & ShiftMask)) ? sel->index : -1);
 		#endif // PRINTINDEX_PATCH
 		else
-			#if SEPARATOR_PATCH
-			puts((sel && !(ev->state & ShiftMask)) ? sel->text_output : text);
-			#else
 			puts((sel && !(ev->state & ShiftMask)) ? sel->text : text);
-			#endif // SEPARATOR_PATCH
 		#elif PRINTINDEX_PATCH
 		if (print_index)
 			printf("%d\n", (sel && !(ev->state & ShiftMask)) ? sel->index : -1);
 		else
-			#if SEPARATOR_PATCH
-			puts((sel && !(ev->state & ShiftMask)) ? sel->text_output : text);
-			#else
 			puts((sel && !(ev->state & ShiftMask)) ? sel->text : text);
-			#endif // SEPARATOR_PATCH
-		#elif SEPARATOR_PATCH
-		puts((sel && !(ev->state & ShiftMask)) ? sel->text_output : text);
 		#else
 		puts((sel && !(ev->state & ShiftMask)) ? sel->text : text);
 		#endif // PIPEOUT_PATCH | PRINTINPUTTEXT_PATCH | PRINTINDEX_PATCH
@@ -1355,11 +1269,11 @@ insert:
 		#else
 		if (!sel)
 			return;
-		cursor = strnlen(sel->text, sizeof text - 1);
-		memcpy(text, sel->text, cursor);
-		text[cursor] = '\0';
+		strncpy(text, sel->text, sizeof text - 1);
+		text[sizeof text - 1] = '\0';
+		cursor = strlen(text);
 		match();
-		#endif // PREFIXCOMPLETION_PATCH
+		#endif //
 		break;
 	}
 
@@ -1393,7 +1307,7 @@ paste(void)
 
 #if ALPHA_PATCH
 static void
-xinitvisual(void)
+xinitvisual()
 {
 	XVisualInfo *infos;
 	XRenderPictFormat *fmt;
@@ -1434,15 +1348,15 @@ xinitvisual(void)
 static void
 readstdin(void)
 {
-	char *line = NULL;
-	#if SEPARATOR_PATCH
-	char *p;
-	#elif TSV_PATCH
-	char *buf, *p;
-	#endif // SEPARATOR_PATCH | TSV_PATCH
-
-	size_t i, linesiz, itemsiz = 0;
-	ssize_t len;
+	char buf[sizeof text], *p;
+	#if JSON_PATCH
+	size_t i;
+	unsigned int imax = 0;
+	struct item *item;
+	#else
+	size_t i, imax = 0, size = 0;
+	#endif // JSON_PATCH
+	unsigned int tmpmax = 0;
 
 	#if PASSWORD_PATCH
 	if (passwd) {
@@ -1452,56 +1366,78 @@ readstdin(void)
 	#endif // PASSWORD_PATCH
 
 	/* read each line from stdin and add it to the item list */
-	for (i = 0; (len = getline(&line, &linesiz, stdin)) != -1; i++) {
-		if (i + 1 >= itemsiz) {
-			itemsiz += 256;
-			if (!(items = realloc(items, itemsiz * sizeof(*items))))
-				die("cannot realloc %zu bytes:", itemsiz * sizeof(*items));
-		}
-		if (line[len - 1] == '\n')
-			line[len - 1] = '\0';
-
-		if (!(items[i].text = strdup(line)))
-			die("strdup:");
-		#if SEPARATOR_PATCH
-		if (separator && (p = separator_greedy ?
-			strrchr(items[i].text, separator) : strchr(items[i].text, separator))) {
+	for (i = 0; fgets(buf, sizeof buf, stdin); i++)	{
+		#if JSON_PATCH
+		item = itemnew();
+		#else
+		if (i + 1 >= size / sizeof *items)
+			if (!(items = realloc(items, (size += BUFSIZ))))
+				die("cannot realloc %u bytes:", size);
+		#endif // JSON_PATCH
+		if ((p = strchr(buf, '\n')))
 			*p = '\0';
-			items[i].text_output = ++p;
-		} else {
-			items[i].text_output = items[i].text;
-		}
-		if (separator_reverse) {
-			p = items[i].text;
-			items[i].text = items[i].text_output;
-			items[i].text_output = p;
-		}
-		#elif TSV_PATCH
-		if (!(buf = strdup(line)))
-			die("cannot strdup %u bytes:", strlen(line) + 1);
+		#if JSON_PATCH
+		if (!(item->text = strdup(buf)))
+		#else
+		if (!(items[i].text = strdup(buf)))
+		#endif // JSON_PATCH
+			die("cannot strdup %u bytes:", strlen(buf) + 1);
+		#if TSV_PATCH
 		if ((p = strchr(buf, '\t')))
 			*p = '\0';
-		items[i].stext = buf;
-		#endif // SEPARATOR_PATCH | TSV_PATCH
+		if (!(items[i].stext = strdup(buf)))
+			die("cannot strdup %u bytes:", strlen(buf) + 1);
+		#endif // TSV_PATCH
 		#if MULTI_SELECTION_PATCH
 		items[i].id = i; /* for multiselect */
 		#if PRINTINDEX_PATCH
 		items[i].index = i;
 		#endif // PRINTINDEX_PATCH
+		#elif JSON_PATCH
+		item->json = NULL;
+		item->out = 0;
+		#if PRINTINDEX_PATCH
+		item->index = i;
+		#endif // PRINTINDEX_PATCH
 		#elif PRINTINDEX_PATCH
 		items[i].index = i;
 		#else
 		items[i].out = 0;
-		#endif // MULTI_SELECTION_PATCH | PRINTINDEX_PATCH
+		#endif // MULTI_SELECTION_PATCH | JSON_PATCH | PRINTINDEX_PATCH
 
 		#if HIGHPRIORITY_PATCH
 		items[i].hp = arrayhas(hpitems, hplength, items[i].text);
 		#endif // HIGHPRIORITY_PATCH
+		#if PANGO_PATCH
+		drw_font_getexts(drw->font, buf, strlen(buf), &tmpmax, NULL, True);
+		#else
+		drw_font_getexts(drw->fonts, buf, strlen(buf), &tmpmax, NULL);
+		#endif // PANGO_PATCH
+		if (tmpmax > inputw) {
+			inputw = tmpmax;
+			#if JSON_PATCH
+			imax = items_ln - 1;
+			#else
+			imax = i;
+			#endif // JSON_PATCH
+		}
 	}
-	free(line);
 	if (items)
+		#if JSON_PATCH
+		items[items_ln].text = NULL;
+		#else
 		items[i].text = NULL;
+		#endif // JSON_PATCH
+	#if PANGO_PATCH
+	inputw = items ? TEXTWM(items[imax].text) : 0;
+	#else
+	inputw = items ? TEXTW(items[imax].text) : 0;
+	#endif // PANGO_PATCH
+	#if JSON_PATCH
+	lines = MIN(lines, items_ln);
+	#else
 	lines = MIN(lines, i);
+	#endif // JSON_PATCH
 }
 #endif // NON_BLOCKING_STDIN_PATCH
 
@@ -1516,6 +1452,7 @@ run(void)
 	#if PRESELECT_PATCH
 	int i;
 	#endif // PRESELECT_PATCH
+
 	while (!XNextEvent(dpy, &ev)) {
 		#if PRESELECT_PATCH
 		if (preselected) {
@@ -1529,25 +1466,13 @@ run(void)
 			preselected = 0;
 		}
 		#endif // PRESELECT_PATCH
-		#if INPUTMETHOD_PATCH
-		if (XFilterEvent(&ev, None))
-			continue;
-		if (composing)
-			continue;
-		#else
 		if (XFilterEvent(&ev, win))
 			continue;
-		#endif // INPUTMETHOD_PATCH
 		switch(ev.type) {
 		#if MOUSE_SUPPORT_PATCH
 		case ButtonPress:
 			buttonpress(&ev);
 			break;
-		#if MOTION_SUPPORT_PATCH
-		case MotionNotify:
-			motionevent(&ev.xbutton);
-			break;
-		#endif // MOTION_SUPPORT_PATCH
 		#endif // MOUSE_SUPPORT_PATCH
 		case DestroyNotify:
 			if (ev.xdestroywindow.window != win)
@@ -1583,11 +1508,6 @@ setup(void)
 {
 	int x, y, i, j;
 	unsigned int du;
-	#if RELATIVE_INPUT_WIDTH_PATCH
-	unsigned int tmp, minstrlen = 0, curstrlen = 0;
-	int numwidthchecks = 100;
-	struct item *item;
-	#endif // RELATIVE_INPUT_WIDTH_PATCH
 	XSetWindowAttributes swa;
 	XIM xim;
 	Window w, dw, *dws;
@@ -1666,11 +1586,7 @@ setup(void)
 
 		#if CENTER_PATCH
 		if (center) {
-			#if XYW_PATCH
-			mw = (dmw>0 ? dmw : MIN(MAX(max_textw() + promptw, min_width), info[i].width));
-			#else
 			mw = MIN(MAX(max_textw() + promptw, min_width), info[i].width);
-			#endif // XYW_PATCH
 			x = info[i].x_org + ((info[i].width  - mw) / 2);
 			y = info[i].y_org + ((info[i].height - mh) / 2);
 		} else {
@@ -1702,11 +1618,7 @@ setup(void)
 			    parentwin);
 		#if CENTER_PATCH
 		if (center) {
-			#if XYW_PATCH
-			mw = (dmw>0 ? dmw : MIN(MAX(max_textw() + promptw, min_width), wa.width));
-			#else
 			mw = MIN(MAX(max_textw() + promptw, min_width), wa.width);
-			#endif // XYW_PATCH
 			x = (wa.width  - mw) / 2;
 			y = (wa.height - mh) / 2;
 		} else {
@@ -1737,22 +1649,7 @@ setup(void)
 	promptw = (prompt && *prompt) ? TEXTW(prompt) - lrpad / 4 : 0;
 	#endif // PANGO_PATCH
 	#endif // CENTER_PATCH
-	#if RELATIVE_INPUT_WIDTH_PATCH
-	for (item = items; !lines && item && item->text; ++item) {
-		curstrlen = strlen(item->text);
-		if (numwidthchecks || minstrlen < curstrlen) {
-			numwidthchecks = MAX(numwidthchecks - 1, 0);
-			minstrlen = MAX(minstrlen, curstrlen);
-			if ((tmp = textw_clamp(item->text, mw/3)) > inputw) {
-				inputw = tmp;
-				if (tmp == mw/3)
-					break;
-			}
-		}
-	}
-	#else
-	inputw = mw / 3; /* input width: ~33.33% of monitor width */
-	#endif // RELATIVE_INPUT_WIDTH_PATCH
+	inputw = MIN(inputw, mw/3);
 	match();
 
 	/* create menu window */
@@ -1770,22 +1667,13 @@ setup(void)
 	swa.event_mask = ExposureMask | KeyPressMask | VisibilityChangeMask
 		#if MOUSE_SUPPORT_PATCH
 		| ButtonPressMask
-		#if MOTION_SUPPORT_PATCH
-		| PointerMotionMask
-		#endif // MOTION_SUPPORT_PATCH
 		#endif // MOUSE_SUPPORT_PATCH
 	;
-	win = XCreateWindow(
-		dpy, root,
-		#if BARPADDING_PATCH && BORDER_PATCH
-		x + sp, y + vp - (topbar ? 0 : border_width * 2), mw - 2 * sp - border_width * 2, mh, border_width,
-		#elif BARPADDING_PATCH
-		x + sp, y + vp, mw - 2 * sp, mh, 0,
-		#elif BORDER_PATCH
-		x, y - (topbar ? 0 : border_width * 2), mw - border_width * 2, mh, border_width,
-		#else
-		x, y, mw, mh, 0,
-		#endif // BORDER_PATCH | BARPADDING_PATCH
+	#if BORDER_PATCH
+	win = XCreateWindow(dpy, parentwin, x, y - (topbar ? 0 : border_width * 2), mw - border_width * 2, mh, border_width,
+	#else
+	win = XCreateWindow(dpy, parentwin, x, y, mw, mh, 0,
+	#endif // BORDER_PATCH
 		#if ALPHA_PATCH
 		depth, InputOutput, visual,
 		CWOverrideRedirect|CWBackPixel|CWBorderPixel|CWColormap|CWEventMask, &swa
@@ -1796,7 +1684,7 @@ setup(void)
 	);
 	#if BORDER_PATCH
 	if (border_width)
-		XSetWindowBorder(dpy, win, scheme[SchemeBorder][ColBg].pixel);
+		XSetWindowBorder(dpy, win, scheme[SchemeSel][ColBg].pixel);
 	#endif // BORDER_PATCH
 	XSetClassHint(dpy, win, &ch);
 	#if WMTYPE_PATCH
@@ -1804,16 +1692,13 @@ setup(void)
 			(unsigned char *) &dock, 1);
 	#endif // WMTYPE_PATCH
 
+
 	/* input methods */
 	if ((xim = XOpenIM(dpy, NULL, NULL, NULL)) == NULL)
 		die("XOpenIM failed: could not open input device");
 
-	#if INPUTMETHOD_PATCH
-	init_input_method(xim);
-	#else
 	xic = XCreateIC(xim, XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
 	                XNClientWindow, win, XNFocusWindow, win, NULL);
-	#endif // INPUTMETHOD_PATCH
 
 	#if MANAGED_PATCH
 	if (managed) {
@@ -1828,20 +1713,14 @@ setup(void)
 
 	XMapRaised(dpy, win);
 	if (embed) {
-		XReparentWindow(dpy, win, parentwin, x, y);
 		XSelectInput(dpy, parentwin, FocusChangeMask | SubstructureNotifyMask);
 		if (XQueryTree(dpy, parentwin, &dw, &w, &dws, &du) && dws) {
 			for (i = 0; i < du && dws[i] != win; ++i)
 				XSelectInput(dpy, dws[i], FocusChangeMask);
 			XFree(dws);
 		}
-		#if !INPUTMETHOD_PATCH
 		grabfocus();
-		#endif // INPUTMETHOD_PATCH
 	}
-	#if INPUTMETHOD_PATCH
-	grabfocus();
-	#endif // INPUTMETHOD_PATCH
 	drw_resize(drw, mw, mh);
 	drawmenu();
 }
@@ -1849,7 +1728,7 @@ setup(void)
 static void
 usage(void)
 {
-	die("usage: dmenu [-bv"
+	fputs("usage: dmenu [-bv"
 		#if CENTER_PATCH
 		"c"
 		#endif
@@ -1889,9 +1768,6 @@ usage(void)
 		"1"
 		#endif // RESTRICT_RETURN_PATCH
 		"] "
-		#if CARET_WIDTH_PATCH
-		"[-cw caret_width] "
-		#endif // CARET_WIDTH_PATCH
 		#if MANAGED_PATCH
 		"[-wm] "
 		#endif // MANAGED_PATCH
@@ -1900,17 +1776,17 @@ usage(void)
 		#endif // GRID_PATCH
 		"[-l lines] [-p prompt] [-fn font] [-m monitor]"
 		"\n             [-nb color] [-nf color] [-sb color] [-sf color] [-w windowid]"
-		#if DYNAMIC_OPTIONS_PATCH || FZFEXPECT_PATCH || ALPHA_PATCH || BORDER_PATCH || HIGHPRIORITY_PATCH
+		#if ALPHA_PATCH || BORDER_PATCH || HIGHPRIORITY_PATCH || INITIALTEXT_PATCH || LINE_HEIGHT_PATCH || NAVHISTORY_PATCH || XYW_PATCH || DYNAMIC_OPTIONS_PATCH || JSON_PATCH
 		"\n            "
 		#endif
+		#if JSON_PATCH
+		" [ -j json-file]"
+		#endif // JSON_PATCH
 		#if DYNAMIC_OPTIONS_PATCH
-		" [-dy command]"
+		" [ -dy command]"
 		#endif // DYNAMIC_OPTIONS_PATCH
-		#if FZFEXPECT_PATCH
-		" [-ex expectkey]"
-		#endif // FZFEXPECT_PATCH
 		#if ALPHA_PATCH
-		" [-o opacity]"
+		" [ -o opacity]"
 		#endif // ALPHA_PATCH
 		#if BORDER_PATCH
 		" [-bw width]"
@@ -1918,9 +1794,6 @@ usage(void)
 		#if HIGHPRIORITY_PATCH
 		" [-hb color] [-hf color] [-hp items]"
 		#endif // HIGHPRIORITY_PATCH
-		#if INITIALTEXT_PATCH || LINE_HEIGHT_PATCH || PRESELECT_PATCH || NAVHISTORY_PATCH || XYW_PATCH
-		"\n            "
-		#endif
 		#if INITIALTEXT_PATCH
 		" [-it text]"
 		#endif // INITIALTEXT_PATCH
@@ -1936,13 +1809,11 @@ usage(void)
 		#if XYW_PATCH
 		" [-X xoffset] [-Y yoffset] [-W width]" // (arguments made upper case due to conflicts)
 		#endif // XYW_PATCH
-		#if HIGHLIGHT_PATCH
-		"\n             [-nhb color] [-nhf color] [-shb color] [-shf color]" // highlight colors
-		#endif // HIGHLIGHT_PATCH
-		#if SEPARATOR_PATCH
-		"\n             [-d separator] [-D separator]"
-		#endif // SEPARATOR_PATCH
-		"\n");
+		#if HIGHLIGHT_PATCH || FUZZYHIGHLIGHT_PATCH
+		"\n [-nhb color] [-nhf color] [-shb color] [-shf color]" // highlight colors
+		#endif // HIGHLIGHT_PATCH | FUZZYHIGHLIGHT_PATCH
+		"\n", stderr);
+	exit(1);
 }
 
 int
@@ -1957,31 +1828,8 @@ main(int argc, char *argv[])
 	#if XRESOURCES_PATCH
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
 		fputs("warning: no locale support\n", stderr);
-	#if INPUTMETHOD_PATCH
-	if (!XSetLocaleModifiers(""))
-		fputs("warning: could not set locale modifiers", stderr);
-	#endif // INPUTMETHOD_PATCH
 	if (!(dpy = XOpenDisplay(NULL)))
 		die("cannot open display");
-
-	/* These need to be checked before we init the visuals and read X resources. */
-	for (i = 1; i < argc; i++) {
-		if (!strcmp(argv[i], "-v")) { /* prints version information */
-			puts("dmenu-"VERSION);
-			exit(0);
-		} else if (!strcmp(argv[i], "-w")) {
-			argv[i][0] = '\0';
-			embed = strdup(argv[++i]);
-		#if ALPHA_PATCH
-		} else if (!strcmp(argv[i], "-o")) {  /* opacity, pass -o 0 to disable alpha */
-			opacity = atoi(argv[++i]);
-		#endif // ALPHA_PATCH
-		} else {
-			continue;
-		}
-		argv[i][0] = '\0'; // mark as used
-	}
-
 	screen = DefaultScreen(dpy);
 	root = RootWindow(dpy, screen);
 	if (!embed || !(parentwin = strtol(embed, NULL, 0)))
@@ -1999,10 +1847,7 @@ main(int argc, char *argv[])
 	readxresources();
 	#endif // XRESOURCES_PATCH
 
-	for (i = 1; i < argc; i++) {
-		if (argv[i][0] == '\0')
-			continue;
-
+	for (i = 1; i < argc; i++)
 		/* these options take no arguments */
 		if (!strcmp(argv[i], "-v")) {      /* prints version information */
 			puts("dmenu-"VERSION);
@@ -2054,10 +1899,6 @@ main(int argc, char *argv[])
 		} else if (!strcmp(argv[i], "-P")) { /* is the input a password */
 			passwd = 1;
 		#endif // PASSWORD_PATCH
-		#if FZFEXPECT_PATCH
-		} else if (!strcmp(argv[i], "-ex")) { /* expect key */
-			expected = argv[++i];
-		#endif // FZFEXPECT_PATCH
 		#if REJECTNOMATCH_PATCH
 		} else if (!strcmp(argv[i], "-R")) { /* reject input which results in no match */
 			reject_no_match = 1;
@@ -2088,6 +1929,10 @@ main(int argc, char *argv[])
 				lines = 1;
 		}
 		#endif // GRID_PATCH
+		#if JSON_PATCH
+		else if (!strcmp(argv[i], "-j"))
+			readjson(argv[++i]);
+		#endif // JSON_PATCH
 		else if (!strcmp(argv[i], "-l"))   /* number of lines in vertical list */
 			lines = atoi(argv[++i]);
 		#if XYW_PATCH
@@ -2100,7 +1945,7 @@ main(int argc, char *argv[])
 		#endif // XYW_PATCH
 		else if (!strcmp(argv[i], "-m"))
 			mon = atoi(argv[++i]);
-		#if ALPHA_PATCH && !XRESOURCES_PATCH
+		#if ALPHA_PATCH
 		else if (!strcmp(argv[i], "-o"))  /* opacity, pass -o 0 to disable alpha */
 			opacity = atoi(argv[++i]);
 		#endif // ALPHA_PATCH
@@ -2108,7 +1953,7 @@ main(int argc, char *argv[])
 			prompt = argv[++i];
 		else if (!strcmp(argv[i], "-fn"))  /* font or font set */
 			#if PANGO_PATCH
-			font = argv[++i];
+			strcpy(font, argv[++i]);
 			#else
 			fonts[0] = argv[++i];
 			#endif // PANGO_PATCH
@@ -2134,7 +1979,7 @@ main(int argc, char *argv[])
 		else if (!strcmp(argv[i], "-hp"))
 			hpitems = tokenize(argv[++i], ",", &hplength);
  		#endif // HIGHPRIORITY_PATCH
-		#if HIGHLIGHT_PATCH
+		#if HIGHLIGHT_PATCH || FUZZYHIGHLIGHT_PATCH
 		else if (!strcmp(argv[i], "-nhb")) /* normal hi background color */
 			colors[SchemeNormHighlight][ColBg] = argv[++i];
 		else if (!strcmp(argv[i], "-nhf")) /* normal hi foreground color */
@@ -2143,22 +1988,9 @@ main(int argc, char *argv[])
 			colors[SchemeSelHighlight][ColBg] = argv[++i];
 		else if (!strcmp(argv[i], "-shf")) /* selected hi foreground color */
 			colors[SchemeSelHighlight][ColFg] = argv[++i];
-		#endif // HIGHLIGHT_PATCH
-		#if CARET_WIDTH_PATCH
-		else if (!strcmp(argv[i], "-cw"))  /* sets caret witdth */
-			caret_width = atoi(argv[++i]);
-		#endif // CARET_WIDTH_PATCH
-		#if !XRESOURCES_PATCH
+		#endif // HIGHLIGHT_PATCH | FUZZYHIGHLIGHT_PATCH
 		else if (!strcmp(argv[i], "-w"))   /* embedding window id */
 			embed = argv[++i];
-		#endif // XRESOURCES_PATCH
-		#if SEPARATOR_PATCH
-		else if (!strcmp(argv[i], "-d") || /* field separator */
-				(separator_greedy = !strcmp(argv[i], "-D"))) {
-			separator = argv[++i][0];
-			separator_reverse = argv[i][1] == '|';
-		}
-		#endif // SEPARATOR_PATCH
 		#if PRESELECT_PATCH
 		else if (!strcmp(argv[i], "-ps"))   /* preselected item */
 			preselected = atoi(argv[++i]);
@@ -2177,10 +2009,8 @@ main(int argc, char *argv[])
 			insert(text, strlen(text));
 		}
 		#endif // INITIALTEXT_PATCH
-		else {
+		else
 			usage();
-		}
-	}
 
 	#if XRESOURCES_PATCH
 	#if PANGO_PATCH
@@ -2193,10 +2023,6 @@ main(int argc, char *argv[])
 	#else // !XRESOURCES_PATCH
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
 		fputs("warning: no locale support\n", stderr);
-	#if INPUTMETHOD_PATCH
-	if (!XSetLocaleModifiers(""))
-		fputs("warning: could not set locale modifiers", stderr);
-	#endif // INPUTMETHOD_PATCH
 	if (!(dpy = XOpenDisplay(NULL)))
 		die("cannot open display");
 	screen = DefaultScreen(dpy);
@@ -2229,11 +2055,6 @@ main(int argc, char *argv[])
 	lrpad = drw->fonts->h;
 	#endif // PANGO_PATCH
 
-	#if BARPADDING_PATCH
-	sp = sidepad;
-	vp = (topbar ? vertpad : - vertpad);
-	#endif // BARPADDING_PATCH
-
 	#if LINE_HEIGHT_PATCH
 	if (lineheight == -1)
 		#if PANGO_PATCH
@@ -2256,19 +2077,39 @@ main(int argc, char *argv[])
 	#else
 	if (fast && !isatty(0)) {
 		grabkeyboard();
+		#if JSON_PATCH
+		if (json)
+			listjson(json);
 		#if DYNAMIC_OPTIONS_PATCH
+		else if (!(dynamic && *dynamic))
+			readstdin();
+		#else
+		else
+			readstdin();
+		#endif // DYNAMIC_OPTIONS_PATCH
+		#elif DYNAMIC_OPTIONS_PATCH
 		if (!(dynamic && *dynamic))
 			readstdin();
 		#else
 		readstdin();
-		#endif // DYNAMIC_OPTIONS_PATCH
+		#endif // JSON_PATCH | DYNAMIC_OPTIONS_PATCH
 	} else {
+		#if JSON_PATCH
+		if (json)
+			listjson(json);
 		#if DYNAMIC_OPTIONS_PATCH
+		else if (!(dynamic && *dynamic))
+			readstdin();
+		#else
+		else
+			readstdin();
+		#endif // DYNAMIC_OPTIONS_PATCH
+		#elif DYNAMIC_OPTIONS_PATCH
 		if (!(dynamic && *dynamic))
 			readstdin();
 		#else
 		readstdin();
-		#endif // DYNAMIC_OPTIONS_PATCH
+		#endif // JSON_PATCH | DYNAMIC_OPTIONS_PATCH
 		grabkeyboard();
 	}
 	#endif // NON_BLOCKING_STDIN_PATCH

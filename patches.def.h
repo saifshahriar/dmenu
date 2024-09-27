@@ -7,23 +7,11 @@
  */
 #define ALPHA_PATCH 1
 
-/* This adds padding for dmenu in similar fashion to the similarly named patch for dwm. The idea
- * is to have dmenu appear on top of the bar when using said patch in dwm.
- * https://github.com/bakkeby/patches/wiki/barpadding
- */
-#define BARPADDING_PATCH 0
-
 /* This patch adds a border around the dmenu window. It is intended to be used with the center
  * or xyw patches, to make the menu stand out from similarly coloured windows.
  * http://tools.suckless.org/dmenu/patches/border/
  */
 #define BORDER_PATCH 1
-
-/* By default the caret in dmenu has a width of 2 pixels. This patch makes that configurable
- * as well as overridable via a command line option.
- * https://github.com/DarkSamus669/dmenu-patches/blob/main/dmenu-caretwidth-5.2.diff
- */
-#define CARET_WIDTH_PATCH 0
 
 /* This patch makes dmenu case-insensitive by default, replacing the
  * case-insensitive -i option with a case sensitive -s option.
@@ -35,6 +23,14 @@
  * https://tools.suckless.org/dmenu/patches/center/
  */
 #define CENTER_PATCH 1
+
+/* This patch enables color emoji in dmenu by removing a workaround for a BadLength error
+ * in the Xft library when color glyphs are used.
+ * To enable this you will need an updated Xft library that can handle color glyphs otherwise
+ * the program will crash on encountering such characters. Note that you will also need a font
+ * that provides color emojis for this to work.
+ */
+#define COLOR_EMOJI_PATCH 0
 
 /* Minor patch to enable the use of Ctrl+v (XA_PRIMARY) and Ctrl+Shift+v (CLIPBOARD) to paste.
  * By default dmenu only supports Ctrl+y and Ctrl+Shift+y to paste.
@@ -57,17 +53,17 @@
  */
 #define EMOJI_HIGHLIGHT_PATCH 0
 
+/* This patch make it so that fuzzy matches gets highlighted and is therefore meant
+ * to be used together with the fuzzymatch patch.
+ * https://tools.suckless.org/dmenu/patches/fuzzyhighlight/
+ */
+#define FUZZYHIGHLIGHT_PATCH 1
+
 /* This patch adds support for fuzzy-matching to dmenu, allowing users to type non-consecutive
  * portions of the string to be matched.
  * https://tools.suckless.org/dmenu/patches/fuzzymatch/
  */
 #define FUZZYMATCH_PATCH 1
-
-/* Adds fzf-like functionality for dmenu.
- * Refer to https://github.com/DAFF0D11/dafmenu/ for documentation and example use cases.
- * https://github.com/DAFF0D11/dafmenu/blob/master/patches/dmenu-fzfexpect-5.1.diff
- */
-#define FZFEXPECT_PATCH 0
 
 /* Allows dmenu's entries to be rendered in a grid by adding a new -g flag to specify
  * the number of grid columns. The -g and -l options can be used together to create a
@@ -83,13 +79,8 @@
 #define GRIDNAV_PATCH 1
 
 /* This patch highlights the individual characters of matched text for each dmenu list entry.
- * If combined with the fuzzymatch patch then fuzzy highlight will be used for highlighting
- * depending on whether fuzzy matching is enabled.
- *
- * Known issue: highlighting does not work properly when pango markup is used
- *
+ * The fuzzy highlight patch takes precedence over this patch.
  * https://tools.suckless.org/dmenu/patches/highlight/
- * https://tools.suckless.org/dmenu/patches/fuzzyhighlight/
  */
 #define HIGHLIGHT_PATCH 0
 
@@ -108,17 +99,24 @@
  */
 #define INITIALTEXT_PATCH 0
 
-/* Adds support for input methods (fctix, ibus, etc.) allowing the user to change the
- * keyboard layout while dmenu is open.
- * https://github.com/bakkeby/dmenu-flexipatch/pull/22
- */
-#define INPUTMETHOD_PATCH 0
-
 /* This patch adds a flag which will cause dmenu to select an item immediately if there
  * is only one matching option left.
  * https://tools.suckless.org/dmenu/patches/instant/
  */
 #define INSTANT_PATCH 0
+
+/* This patch adds basic support for json files.
+ * This patch depends on the jansson library. Uncomment the relevant line in config.mk when
+ * enabling this patch.
+ *
+ * This patch is not compatible with the multi-selection, printinputtext, pipeout and
+ * non-blocking stdin patches.
+ * The multi-selection patch takes precedence over this patch.
+ * This patch takes precedence over non-blocking stdin, pipeout and printintputtext patches.
+ *
+ * https://tools.suckless.org/dmenu/patches/json/
+ */
+#define JSON_PATCH 0
 
 /* This patch adds a '-h' option which sets the minimum height of a dmenu line. This helps
  * integrate dmenu with other UI elements that require a particular vertical size.
@@ -146,11 +144,6 @@
  */
 #define MOUSE_SUPPORT_PATCH 1
 
-/* Expands the above to support mouse hovering.
- * https://tools.suckless.org/dmenu/patches/mouse-support/
- */
-#define MOTION_SUPPORT_PATCH 1
-
 /* Without this patch when you press Ctrl+Enter dmenu just outputs current item and it is not
  * possible to undo that.
  * With this patch dmenu will output all selected items only on exit. It is also possible to
@@ -172,12 +165,6 @@
  * https://tools.suckless.org/dmenu/patches/navhistory/
  */
 #define NAVHISTORY_PATCH 0
-
-/* This patch adds back in the workaround for a BadLength error in the Xft library when color
- * glyphs are used. This is for systems that do not have an updated version of the Xft library
- * (or generally prefer monochrome fonts).
- */
-#define NO_COLOR_EMOJI_PATCH 0
 
 /* Adds the -S option to disable sorting menu items after matching. Useful, for example, when menu
  * items are sorted by their frequency of use (using an external cache) and the most frequently
@@ -220,8 +207,6 @@
  *
  * A long term fix for the libXft library is pending approval of this pull request:
  * https://gitlab.freedesktop.org/xorg/lib/libxft/-/merge_requests/1
- *
- * Known issue: not compatible with the scroll patch
  *
  * Also see:
  * https://developer.gnome.org/pygtk/stable/pango-markup-language.html
@@ -288,17 +273,6 @@
  */
 #define REJECTNOMATCH_PATCH 0
 
-/* The input width used to be relative to the input options prior to commit e1e1de7:
- * https://git.suckless.org/dmenu/commit/e1e1de7b3b8399cba90ddca9613f837b2dbef7b9.html
- *
- * This had a performance hit when using large data sets and was removed in favour of having the
- * input width take up 1/3rd of the available space.
- *
- * This option adds that feature back in with some performance optimisations at the cost of
- * accuracy and correctness.
- */
-#define RELATIVE_INPUT_WIDTH_PATCH 0
-
 /* This patch adds a '-1' option which disables Shift-Return and Ctrl-Return.
  * This guarantees that dmenu will only output one item, and that item was read from stdin.
  * The original patch used '-r'. This was changed to '-1' to avoid conflict with the incremental
@@ -309,19 +283,9 @@
 
 /* This patch adds support for text scrolling and no longer appends '...' for long input as
  * it can handle long text.
- *
- * Known issue: not compatible with the pango patch
- *
  * https://tools.suckless.org/dmenu/patches/scroll/
  */
-#define SCROLL_PATCH 0
-
-/* This patch adds -d and -D flags which separates the input into two halves; one half to be
- * displayed in dmenu and the other to be printed to stdout. This patch takes precedence over
- * the TSV patch.
- * https://tools.suckless.org/dmenu/patches/separator/
- */
-#define SEPARATOR_PATCH 0
+#define SCROLL_PATCH 1
 
 /* This patch allows the symbols, which are printed in dmenu to indicate that either the input
  * is too long or there are too many options to be shown in dmenu in one line, to be defined.

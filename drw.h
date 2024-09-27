@@ -55,22 +55,16 @@ void drw_free(Drw *drw);
 
 /* Fnt abstraction */
 #if PANGO_PATCH
-Fnt *drw_font_create(Drw* drw, const char *font);
+Fnt *drw_font_create(Drw* drw, const char font[]);
 void drw_font_free(Fnt* set);
 unsigned int drw_font_getwidth(Drw *drw, const char *text, Bool markup);
-unsigned int drw_fontset_getwidth_clamp(Drw *drw, const char *text, unsigned int n);
 void drw_font_getexts(Fnt *font, const char *text, unsigned int len, unsigned int *w, unsigned int *h, Bool markup);
 #else
 Fnt *drw_fontset_create(Drw* drw, const char *fonts[], size_t fontcount);
 void drw_fontset_free(Fnt* set);
 unsigned int drw_fontset_getwidth(Drw *drw, const char *text);
-unsigned int drw_fontset_getwidth_clamp(Drw *drw, const char *text, unsigned int n);
 void drw_font_getexts(Fnt *font, const char *text, unsigned int len, unsigned int *w, unsigned int *h);
 #endif // PANGO_PATCH
-
-#if HIGHLIGHT_PATCH
-int utf8len(const char *c);
-#endif // HIGHLIGHT_PATCH
 
 /* Colorscheme abstraction */
 #if ALPHA_PATCH
